@@ -1,130 +1,65 @@
 ; Patryk Jędrzejczak
 
+; gval - pobiera z pamięci wartość zależnie od arg, umieszcza wynik w al
+; zmienia rejestry rax, r9, r10
 %macro   gval 1
-  cmp    %1, 0
-  jne    %%gvalNot0
-  mov    al, r8b
-  jmp    %%gvalFinish
-%%gvalNot0:
-  cmp    %1, 1
-  jne    %%gvalNot1
-  mov    al, r9b
-  jmp    %%gvalFinish
-%%gvalNot1:
-  cmp    %1, 2
-  jne    %%gvalNot2
-  mov    al, r10b
-  jmp    %%gvalFinish
-%%gvalNot2:
-  cmp    %1, 3
-  jne    %%gvalNot3
-  mov    al, r11b
-  jmp    %%gvalFinish
-%%gvalNot3:
-  cmp    %1, 4
-  jne    %%gvalNot4
-  mov    al, [rsi + r10]
-  jmp    %%gvalFinish
-%%gvalNot4:
-  cmp    %1, 5
-  jne    %%gvalNot5
-  mov    al, [rsi + r11]
-  jmp    %%gvalFinish
-%%gvalNot5:
-  cmp    %1, 6
-  jne    %%gvalNot6
-  mov    rax, r10
-  add    al, r9b
-  mov    al, [rsi + rax]
-  jmp    %%gvalFinish
-%%gvalNot6:
-  mov    rax, r11
-  add    al, r9b
-  mov    al, [rsi + rax]
+  mov    al, %1
+  movzx  rax, al
+  mov    r9, rax                      ; r9 - arg
+  mov    al, [r8 + r9]                ; al - zwracana wartość
+  cmp    r9, 3
+  jbe    %%gvalFinish
+  mov    r10, 0                       ; r10 - indeks w data
+  cmp    r9, 5
+  jbe    %%dontAddDReg
+  mov    r10b, [r8 + 1]               ; r10b += D
+  sub    r9, 2
+%%dontAddDReg:
+  add    r10b, [r8 + r9 - 2]          ; r10b += X lub r10b += Y
+  mov    al, [rsi + r10]              ; zwrócenie wyniku
 %%gvalFinish:
 %endmacro
 
+; pval - wstawia wartość znajdującą się w al w miejsce zależnie od arg
+; zmienia rejestry rax, r9, r10, r11
 %macro   pval 1
-  cmp    %1, 0
-  jne    %%pvalNot0
-  mov    r8b, al
-  jmp    %%pvalFinish
-%%pvalNot0:
-  cmp    %1, 1
-  jne    %%pvalNot1
-  mov    r9b, al
-  jmp    %%pvalFinish
-%%pvalNot1:
-  cmp    %1, 2
-  jne    %%pvalNot2
-  mov    r10b, al
-  jmp    %%pvalFinish
-%%pvalNot2:
-  cmp    %1, 3
-  jne    %%pvalNot3
-  mov    r11b, al
-  jmp    %%pvalFinish
-%%pvalNot3:
-  cmp    %1, 4
-  jne    %%pvalNot4
-  mov    [rsi + r10], al
-  jmp    %%pvalFinish
-%%pvalNot4:
-  cmp    %1, 5
-  jne    %%pvalNot5
-  mov    [rsi + r11], al
-  jmp    %%pvalFinish
-%%pvalNot5:
-  cmp    %1, 6
-  jne    %%pvalNot6
-  mov    r15, r10
-  add    r15b, r9b
-  mov    [rsi + r15], al
-  jmp    %%pvalFinish
-%%pvalNot6:
-  mov    r15, r11
-  add    r15b, r9b
-  mov    [rsi + r15], al
+  mov    r11b, al                     ; r11b - wstawiana wartość
+  mov    al, %1
+  movzx  rax, al
+  mov    r9, rax                      ; r9 - arg
+  lea    r10, [r8 + r9]               ; r10 - wynikowy adres
+  cmp    r9, 3
+  jbe    %%pvalFinish
+  mov    al, 0                        ; al - indeks w data
+  cmp    r9, 5
+  jbe    %%dontAddDReg
+  mov    al, [r8 + 1]                 ; al += D
+  sub    r9, 2
+%%dontAddDReg:
+  add    al, [r8 + r9 - 2]
+  lea    r10, [rsi + rax]
 %%pvalFinish:
+  mov    [r10], r11b
 %endmacro
 
+; Ustawia flagę C na stan flagi C procesora SO.
 %macro   setc 0
-  cmp    r13b, 1
-  clc
-  jne    %%setcFinish
-  stc
-%%setcFinish:
+  mov    r14b, -1
+  add    r14b, [r8 + 6]
 %endmacro
 
+; Ustawia flagę C procesora SO na stan flagi C.
 %macro   getc 0
-  mov    r13b, 0
-  jnc    %%getcFinish
-  mov    r13b, 1
-%%getcFinish:
+  mov    byte [r8 + 6], 0
+  rcl    byte [r8 + 6], 1
 %endmacro
 
+; Ustawia flagę Z procesora SO na stan flagi Z.
 %macro   getz 0
-  mov    r14b, 0
+  mov    byte [r8 + 7], 0
   jnz    %%getzFinish
-  mov    r14b, 1
+  mov    byte [r8 + 7], 1
 %%getzFinish:
-%endmacro
-
-%macro   passl 0
-  push   rcx
-  push   rdx
-  mov    ecx, 1
-  mov    rdx, mutex
-%%busy_wait:
-  xchg   [rdx], ecx
-  test   ecx, ecx
-  jnz    %%busy_wait
-%endmacro
-
-%macro   freel 0
-  mov    [rdx], ecx
-  pop    rdx
-  pop    rcx
 %endmacro
 
 section .bss
@@ -145,41 +80,28 @@ so_emul:
   push   r12
   push   r13
   push   r14
-  push   r15
   push   rbx
-  push   rbp
-  mov    rbp, rsp                     ; Zapisujemy początkowy adres wierzchołka stosu w rpb.
 
   xchg   rcx, rdx
 
-; Zerujemy używane rejestry:
-  xor    rbx, rbx
-  xor    r8, r8
-  xor    r9, r9
-  xor    r10, r10
-  xor    r11, r11
-  xor    r12, r12
-  xor    r13, r13
-  xor    r14, r14
-  xor    r15, r15
-
-; Wczytujemy stan procesora SO:
-  lea    rax, [rel SO]                ; rax - adres początku tablicy SO
-  mov    r8b, [rax + rdx * 8]         ; r8b - wartość rejestru A rdzenia core
-  mov    r9b, [rax + rdx * 8 + 1]     ; r9b - wartość rejestru D rdzenia core
-  mov    r10b, [rax + rdx * 8 + 2]    ; r10b - wartość rejestru X rdzenia core
-  mov    r11b, [rax + rdx * 8 + 3]    ; r11b - wartość rejestru Y rdzenia core
-  mov    r12b, [rax + rdx * 8 + 4]    ; r12b - wartość licznika rozkazów PC rdzenia core
-  mov    r13b, [rax + rdx * 8 + 6]    ; r13b - wartość znacznika C rdzenia core
-  mov    r14b, [rax + rdx * 8 + 7]    ; r14b - wartość znacznika Z rdzenia core
+  mov    r8, SO
+  lea    r8, [r8 + rdx * 8]           ; r8 - adres początku bloku pamięci rdzenia core
 
   cmp    rcx, 0
   je     stepsEquals0
 
-  dec    r12b
+  dec    byte [r8 + 4]
 executeNextInstruction:
-  inc    r12b
-  mov    bx, [rdi + r12 * 2]          ; bx - kolejna instrukcja do wykonania
+  inc    byte [r8 + 4]
+  movzx  rax, byte [r8 + 4]
+  mov    bx, [rdi + rax * 2]          ; bx - kolejna instrukcja do wykonania
+
+; Przechodzimy przez spin_lock.
+  mov    r12d, 1
+busy_wait:
+  xchg   [rel mutex], r12d
+  test   r12d, r12d
+  jnz    busy_wait
 
   cmp    bx, 0x8000
   je     CLC
@@ -189,9 +111,6 @@ executeNextInstruction:
 
   cmp    bx, 0xffff
   je     BRK
-
-  cmp    bx, 0xc600
-  jae    finishExecution
 
   cmp    bx, 0xc500
   jae    JZ
@@ -205,234 +124,173 @@ executeNextInstruction:
   cmp    bx, 0xc200
   jae    JNC
 
-  cmp    bx, 0xc100
-  jae    finishExecution
-
   cmp    bx, 0xc000
   jae    JMP
 
+  mov    r13, 0
   cmp    bx, 0x7000
-  jae    RCR
+  jae    secondGroupInstruction
 
+  inc    r13
   cmp    bx, 0x6800
-  jae    CMPI
+  jae    secondGroupInstruction
 
+  inc    r13
   cmp    bx, 0x6000
-  jae    ADDI
+  jae    secondGroupInstruction
 
+  inc    r13
   cmp    bx, 0x5800
-  jae    XORI
+  jae    secondGroupInstruction
 
-  cmp    bx, 0x4800
-  jae    finishExecution
-
+  add    r13, 3
   cmp    bx, 0x4000
-  jae    MOVI
+  jae    secondGroupInstruction
 
-  cmp    bl, 0x08
+  jmp    nonSecondGroupInstruction
+
+secondGroupInstruction:
+  mov    ax, 0x800
+  imul   ax, r13w
+  add    bx, ax
+  sub    bx, 0x7000                   ; bh - arg1, bl - imm8
+  gval   bh
+  cmp    r13, 0
+  jz     RCR
+  sub    r13, 1
+  jz     CMPI
+  sub    r13, 1
+  jz     ADDI
+  sub    r13, 1
+  jz     XORI
+  jmp    MOVI
+
+nonSecondGroupInstruction:
+; Wczytujemy argumenty.
+  mov    r14b, bl
+
+  mov    bl, bh
+  shr    bl, 3                        ; bl - arg2
+  and    bh, 7                        ; bh - arg1
+  cmp    r14b, 0x08
+  jne    dontSwapForXCHG
+  cmp    bh, bl
+  jbe    dontSwapForXCHG
+  xchg   bh, bl
+dontSwapForXCHG:
+  gval   bl
+  cmp    r14b, 0x00
+  je     putValue                     ; MOV is done here
+  mov    r13b, al
+  gval   bh
+
+  cmp    r14b, 0x08
   je     XCHG
 
-  cmp    bl, 0x07
+  cmp    r14b, 0x07
   je     SBB
 
-  cmp    bl, 0x06
+  cmp    r14b, 0x06
   je     ADC
 
-  cmp    bl, 0x05
+  cmp    r14b, 0x05
   je     SUB
 
-  cmp    bl, 0x04
+  cmp    r14b, 0x04
   je     ADD
 
-  cmp    bl, 0x02
+  cmp    r14b, 0x02
   je     OR
 
-  cmp    bl, 0x00
-  je     MOV
-
-  jmp    finishExecution
-
-MOV:
-  mov    al, bh
-  shr    al, 3                        ; al - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    al, 7
-  ja     finishExecution              ; incorrect arg2
-  passl
-  gval   al
-  pval   bh
-  freel
-  jmp    finishExecution
-
 OR:
-  mov    al, bh
-  shr    al, 3                        ; al - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    al, 7
-  ja     finishExecution              ; incorrect arg2
-  passl
-  gval   al
-  mov    r15b, al
-  gval   bh
-  setc
-  or     al, r15b
+  or     al, r13b
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 ADD:
-  mov    al, bh
-  shr    al, 3                        ; al - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    al, 7
-  ja     finishExecution              ; incorrect arg2
-  passl
-  gval   al
-  mov    r15b, al
-  gval   bh
-  setc
-  add    al, r15b
+  add    al, r13b
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 SUB:
-  mov    al, bh
-  shr    al, 3                        ; al - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    al, 7
-  ja     finishExecution              ; incorrect arg2
-  passl
-  gval   al
-  mov    r15b, al
-  gval   bh
-  setc
-  sub    al, r15b
+  sub    al, r13b
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 ADC:
-  mov    al, bh
-  shr    al, 3                        ; al - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    al, 7
-  ja     finishExecution              ; incorrect arg2
-  passl
-  gval   al
-  mov    r15b, al
-  gval   bh
   setc
-  adc    al, r15b
+  adc    al, r13b
   getc
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 SBB:
-  mov    al, bh
-  shr    al, 3                        ; al - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    al, 7
-  ja     finishExecution              ; incorrect arg2
-  passl
-  gval   al
-  mov    r15b, al
-  gval   bh
   setc
-  sbb    al, r15b
+  sbb    al, r13b
   getc
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
+
+XCHG:
+  pval   bl
+  mov    al, r13b
+  jmp    putValue
 
 MOVI:
-  sub    bh, 0x40                     ; bh - arg1, bl - imm8
-  passl
   mov    al, bl
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 XORI:
-  sub    bh, 0x58                     ; bh - arg1, bl - imm8
-  passl
-  gval   bh
   xor    al, bl
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 ADDI:
-  sub    bh, 0x60                     ; bh - arg1, bl - imm8
-  passl
-  gval   bh
   add    al, bl
   getz
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 CMPI:
-  sub    bh, 0x68                     ; bh - arg1, bl - imm8
-  passl
-  gval   bh
   cmp    al, bl
   getc
   getz
-  freel
   jmp    finishExecution
 
 RCR:
-  cmp    bl, 1
-  jne    finishExecution
-  sub    bh, 0x70
-  cmp    bh, 7                        ; bh - arg1
-  ja     finishExecution
-  passl
-  gval   bh
   setc
   rcr    al, 1
   getc
-  pval   bh
-  freel
-  jmp    finishExecution
+  jmp    putValue
 
 CLC:
-  xor    r13b, r13b
+  mov    byte [r8 + 6], 0
   jmp    finishExecution
 
 STC:
-  mov    r13b, 1
+  mov    byte [r8 + 6], 1
   jmp    finishExecution
 
 JMP:
-  add    r12b, bl                     ; bl - imm8
+  add    byte [r8 + 4], bl             ; bl - imm8
   jmp    finishExecution
 
 JNC:
-  cmp    r13b, 0
+  cmp    byte [r8 + 6], 0
   je     JMP
   jmp    finishExecution
 
 JC:
-  cmp    r13b, 1
+  cmp    byte [r8 + 6], 1
   je     JMP
   jmp    finishExecution
 
 JNZ:
-  cmp    r14b, 0
+  cmp    byte [r8 + 7], 0
   je     JMP
   jmp    finishExecution
 
 JZ:
-  cmp    r14b, 1
+  cmp    byte [r8 + 7], 1
   je     JMP
   jmp    finishExecution
 
@@ -440,65 +298,23 @@ BRK:
   mov    rcx,  1
   jmp    finishExecution
 
-XCHG:
-  mov    bl, bh
-  shr    bl, 3                        ; bl - arg2
-  and    bh, 7                        ; bh - arg1
-  cmp    bl, 7
-  ja     finishExecution              ; incorrect arg2
-  cmp    bh, bl
-  jbe    dontSwap
-  xchg   bh, bl                       ; bh <= bl
-dontSwap:
-  push   rdi
-  passl
-  gval   bl
-  mov    dil, al
-  gval   bh
-  pval   bl
-  mov    al, dil
+putValue:
   pval   bh
-  freel
-  pop    rdi
-  jmp    finishExecution
 
 finishExecution:
+  mov    [rel mutex], r12d            ; Zwalniamy spin_lock.
   dec    rcx
   jnz    executeNextInstruction
-  inc    r12b
+  inc    byte [r8 + 4]
 
 stepsEquals0:
 
-; Zapamiętujemy stan procesora SO:
-  lea    rax, [rel SO]
-  mov    [rax + rdx * 8], r8b
-  mov    [rax + rdx * 8 + 1], r9b
-  mov    [rax + rdx * 8 + 2], r10b
-  mov    [rax + rdx * 8 + 3], r11b
-  mov    [rax + rdx * 8 + 4], r12b
-  mov    [rax + rdx * 8 + 6], r13b
-  mov    [rax + rdx * 8 + 7], r14b
-
 ; Przywracamy wartości rejestrów sprzed wywołania funkcji.
-  leave
   pop    rbx
-  pop    r15
   pop    r14
   pop    r13
   pop    r12
 
 ; Zwracamy wynikową strukturę:
-  mov    rax, [rax + rdx * 8]
-  ret
-
-xd:
-; Przywracamy wartości rejestrów sprzed wywołania funkcji.
-  leave
-  pop    rbx
-  pop    r15
-  pop    r14
-  pop    r13
-  pop    r12
-
-; Zwracamy wynikową strukturę:
+  mov    rax, [r8]
   ret
