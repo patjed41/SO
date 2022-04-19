@@ -110,6 +110,23 @@
 %%getzFinish:
 %endmacro
 
+%macro   passl 0
+  push   rcx
+  push   rdx
+  mov    ecx, 1
+  mov    rdx, mutex
+%%busy_wait:
+  xchg   [rdx], ecx
+  test   ecx, ecx
+  jnz    %%busy_wait
+%endmacro
+
+%macro   freel 0
+  mov    [rdx], ecx
+  pop    rdx
+  pop    rcx
+%endmacro
+
 section .bss
 
 SO:      resq CORES
@@ -241,8 +258,10 @@ MOV:
   and    bh, 7                        ; bh - arg1
   cmp    al, 7
   ja     finishExecution              ; incorrect arg2
+  passl
   gval   al
   pval   bh
+  freel
   jmp    finishExecution
 
 OR:
@@ -251,6 +270,7 @@ OR:
   and    bh, 7                        ; bh - arg1
   cmp    al, 7
   ja     finishExecution              ; incorrect arg2
+  passl
   gval   al
   mov    r15b, al
   gval   bh
@@ -258,6 +278,7 @@ OR:
   or     al, r15b
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 ADD:
@@ -266,6 +287,7 @@ ADD:
   and    bh, 7                        ; bh - arg1
   cmp    al, 7
   ja     finishExecution              ; incorrect arg2
+  passl
   gval   al
   mov    r15b, al
   gval   bh
@@ -273,6 +295,7 @@ ADD:
   add    al, r15b
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 SUB:
@@ -281,6 +304,7 @@ SUB:
   and    bh, 7                        ; bh - arg1
   cmp    al, 7
   ja     finishExecution              ; incorrect arg2
+  passl
   gval   al
   mov    r15b, al
   gval   bh
@@ -288,6 +312,7 @@ SUB:
   sub    al, r15b
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 ADC:
@@ -296,6 +321,7 @@ ADC:
   and    bh, 7                        ; bh - arg1
   cmp    al, 7
   ja     finishExecution              ; incorrect arg2
+  passl
   gval   al
   mov    r15b, al
   gval   bh
@@ -304,6 +330,7 @@ ADC:
   getc
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 SBB:
@@ -312,6 +339,7 @@ SBB:
   and    bh, 7                        ; bh - arg1
   cmp    al, 7
   ja     finishExecution              ; incorrect arg2
+  passl
   gval   al
   mov    r15b, al
   gval   bh
@@ -320,36 +348,45 @@ SBB:
   getc
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 MOVI:
   sub    bh, 0x40                     ; bh - arg1, bl - imm8
+  passl
   mov    al, bl
   pval   bh
+  freel
   jmp    finishExecution
 
 XORI:
   sub    bh, 0x58                     ; bh - arg1, bl - imm8
+  passl
   gval   bh
   xor    al, bl
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 ADDI:
   sub    bh, 0x60                     ; bh - arg1, bl - imm8
+  passl
   gval   bh
   add    al, bl
   getz
   pval   bh
+  freel
   jmp    finishExecution
 
 CMPI:
   sub    bh, 0x68                     ; bh - arg1, bl - imm8
+  passl
   gval   bh
   cmp    al, bl
   getc
   getz
+  freel
   jmp    finishExecution
 
 RCR:
@@ -358,11 +395,13 @@ RCR:
   sub    bh, 0x70
   cmp    bh, 7                        ; bh - arg1
   ja     finishExecution
+  passl
   gval   bh
   setc
   rcr    al, 1
   getc
   pval   bh
+  freel
   jmp    finishExecution
 
 CLC:
@@ -407,23 +446,20 @@ XCHG:
   and    bh, 7                        ; bh - arg1
   cmp    bl, 7
   ja     finishExecution              ; incorrect arg2
-  push   rcx
-  push   rdx
-  mov    rcx, 1
-  lea    rdx, [rel mutex]
-busy_wait:
-  xchg   [rdx], rcx
-  test   rcx, rcx
-  jnz    busy_wait
+  cmp    bh, bl
+  jbe    dontSwap
+  xchg   bh, bl                       ; bh <= bl
+dontSwap:
+  push   rdi
+  passl
   gval   bl
-  mov    ah, al
+  mov    dil, al
   gval   bh
   pval   bl
-  mov    al, ah
+  mov    al, dil
   pval   bh
-  mov    [rdx], rcx
-  pop    rdx
-  pop    rcx
+  freel
+  pop    rdi
   jmp    finishExecution
 
 finishExecution:
