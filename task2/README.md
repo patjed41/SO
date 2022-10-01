@@ -1,4 +1,4 @@
-# Processor SO emulator
+# SO processor emulator
 
 ## Full description in polish
 
