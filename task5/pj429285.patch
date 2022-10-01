@@ -1,0 +1,445 @@
+diff -rupNEZbB ./usr/include/fcntl.h zad5/usr/include/fcntl.h
+--- ./usr/include/fcntl.h	2022-05-31 23:19:28.874096050 +0200
++++ zad5/usr/include/fcntl.h	2022-06-15 18:02:28.178053406 +0200
+@@ -301,6 +301,14 @@ struct flock {
+ #define	AT_REMOVEDIR		0x800	/* Remove directory only */
+ #endif
+ 
++/*
++ * Event flags used by notify()
++ */
++#define	NOTIFY_OPEN	0x00000001	/* file is opened */
++#define	NOTIFY_TRIOPEN	0x00000002	/* file is opened >= 3 times simultaneously */
++#define	NOTIFY_CREATE	0x00000004	/* file is created in the directory */
++#define	NOTIFY_MOVE	0x00000008	/* file is moved to the directory */
++
+ 
+ #ifndef _KERNEL
+ #include <sys/cdefs.h>
+diff -rupNEZbB ./usr/include/minix/callnr.h zad5/usr/include/minix/callnr.h
+--- ./usr/include/minix/callnr.h	2022-05-31 23:19:29.154096007 +0200
++++ zad5/usr/include/minix/callnr.h	2022-06-15 18:02:27.606047956 +0200
+@@ -118,7 +118,8 @@
+ #define VFS_COPYFD		(VFS_BASE + 46)
+ #define VFS_CHECKPERMS		(VFS_BASE + 47)
+ #define VFS_GETSYSINFO		(VFS_BASE + 48)
++#define VFS_NOTIFY		(VFS_BASE + 49)
+ 
+-#define NR_VFS_CALLS		49	/* highest number from base plus one */
++#define NR_VFS_CALLS		50	/* highest number from base plus one */
+ 
+ #endif /* !_MINIX_CALLNR_H */
+diff -rupNEZbB ./usr/include/minix/ipc.h zad5/usr/include/minix/ipc.h
+--- ./usr/include/minix/ipc.h	2022-05-31 23:19:29.194096002 +0200
++++ zad5/usr/include/minix/ipc.h	2022-06-15 18:02:27.610047994 +0200
+@@ -842,6 +842,14 @@ typedef struct {
+ _ASSERT_MSG_SIZE(mess_lc_vfs_umount);
+ 
+ typedef struct {
++	int fd;
++	int event;
++
++	uint8_t data[48];
++} mess_lc_vfs_notify;
++_ASSERT_MSG_SIZE(mess_lc_vfs_notify);
++
++typedef struct {
+ 	void		*addr;
+ 	uint8_t		padding[52];
+ } mess_lc_vm_brk;
+@@ -2121,6 +2129,7 @@ typedef struct {
+ 		mess_lc_vfs_truncate	m_lc_vfs_truncate;
+ 		mess_lc_vfs_umask	m_lc_vfs_umask;
+ 		mess_lc_vfs_umount	m_lc_vfs_umount;
++		mess_lc_vfs_notify	m_lc_vfs_notify;
+ 		mess_lc_vm_brk		m_lc_vm_brk;
+ 		mess_lc_vm_getphys	m_lc_vm_getphys;
+ 		mess_lc_vm_rusage	m_lc_vm_rusage;
+diff -rupNEZbB ./usr/include/sys/errno.h zad5/usr/include/sys/errno.h
+--- ./usr/include/sys/errno.h	2022-05-31 23:19:29.546095947 +0200
++++ zad5/usr/include/sys/errno.h	2022-06-15 18:02:28.042052111 +0200
+@@ -172,7 +172,9 @@
+ #define	ENOLINK		(_SIGN 95 )		/* Link has been severed */
+ #define	EPROTO		(_SIGN 96 )		/* Protocol error */
+ 
+-#define	ELAST		(_SIGN 96 )		/* Must equal largest errno */
++#define	ENONOTIFY		(_SIGN 97 )		/* No more notifications available */
++
++#define	ELAST		(_SIGN 97 )		/* Must equal largest errno */
+ 
+ #if defined(_KERNEL) || defined(_KMEMUSER)
+ /* pseudo-errors returned inside kernel to modify return to process */
+diff -rupNEZbB ./usr/include/sys/fcntl.h zad5/usr/include/sys/fcntl.h
+--- ./usr/include/sys/fcntl.h	2022-05-31 23:19:29.570095943 +0200
++++ zad5/usr/include/sys/fcntl.h	2022-06-15 18:02:28.042052111 +0200
+@@ -301,6 +301,14 @@ struct flock {
+ #define	AT_REMOVEDIR		0x800	/* Remove directory only */
+ #endif
+ 
++/*
++ * Event flags used by notify()
++ */
++#define	NOTIFY_OPEN	0x00000001	/* file is opened */
++#define	NOTIFY_TRIOPEN	0x00000002	/* file is opened >= 3 times simultaneously */
++#define	NOTIFY_CREATE	0x00000004	/* file is created in the directory */
++#define	NOTIFY_MOVE	0x00000008	/* file is moved to the directory */
++
+ 
+ #ifndef _KERNEL
+ #include <sys/cdefs.h>
+diff -rupNEZbB ./usr/src/minix/include/minix/callnr.h zad5/usr/src/minix/include/minix/callnr.h
+--- ./usr/src/minix/include/minix/callnr.h	2022-05-31 23:18:42.902097676 +0200
++++ zad5/usr/src/minix/include/minix/callnr.h	2022-06-15 18:02:09.181872562 +0200
+@@ -118,7 +118,8 @@
+ #define VFS_COPYFD		(VFS_BASE + 46)
+ #define VFS_CHECKPERMS		(VFS_BASE + 47)
+ #define VFS_GETSYSINFO		(VFS_BASE + 48)
++#define VFS_NOTIFY		(VFS_BASE + 49)
+ 
+-#define NR_VFS_CALLS		49	/* highest number from base plus one */
++#define NR_VFS_CALLS		50	/* highest number from base plus one */
+ 
+ #endif /* !_MINIX_CALLNR_H */
+diff -rupNEZbB ./usr/src/minix/include/minix/ipc.h zad5/usr/src/minix/include/minix/ipc.h
+--- ./usr/src/minix/include/minix/ipc.h	2022-05-31 23:18:42.938097679 +0200
++++ zad5/usr/src/minix/include/minix/ipc.h	2022-06-15 18:02:09.181872562 +0200
+@@ -842,6 +842,14 @@ typedef struct {
+ _ASSERT_MSG_SIZE(mess_lc_vfs_umount);
+ 
+ typedef struct {
++	int fd;
++	int event;
++
++	uint8_t data[48];
++} mess_lc_vfs_notify;
++_ASSERT_MSG_SIZE(mess_lc_vfs_notify);
++
++typedef struct {
+ 	void		*addr;
+ 	uint8_t		padding[52];
+ } mess_lc_vm_brk;
+@@ -2121,6 +2129,7 @@ typedef struct {
+ 		mess_lc_vfs_truncate	m_lc_vfs_truncate;
+ 		mess_lc_vfs_umask	m_lc_vfs_umask;
+ 		mess_lc_vfs_umount	m_lc_vfs_umount;
++		mess_lc_vfs_notify	m_lc_vfs_notify;
+ 		mess_lc_vm_brk		m_lc_vm_brk;
+ 		mess_lc_vm_getphys	m_lc_vm_getphys;
+ 		mess_lc_vm_rusage	m_lc_vm_rusage;
+diff -rupNEZbB ./usr/src/minix/servers/vfs/const.h zad5/usr/src/minix/servers/vfs/const.h
+--- ./usr/src/minix/servers/vfs/const.h	2022-05-31 23:18:49.966098138 +0200
++++ zad5/usr/src/minix/servers/vfs/const.h	2022-06-15 18:02:14.681924885 +0200
+@@ -7,6 +7,7 @@
+ #define NR_MNTS           16 	/* # slots in mount table */
+ #define NR_VNODES       1024	/* # slots in vnode table */
+ #define NR_WTHREADS	   9	/* # slots in worker thread table */
++#define NR_NOTIFY          8	/* # slots in notify table */
+ 
+ #define NR_NONEDEVS	NR_MNTS	/* # slots in nonedev bitmap */
+ 
+@@ -22,6 +23,7 @@
+ #define FP_BLOCKED_ON_SELECT	4 /* susp'd on select */
+ #define FP_BLOCKED_ON_OTHER	5 /* blocked on other process, check
+ 				     fp_task to find out */
++#define FP_BLOCKED_ON_NOTIFY	6 /* susp'd on notify */
+ 
+ /* test if the process is blocked on something */
+ #define fp_is_blocked(fp)	((fp)->fp_blocked_on != FP_BLOCKED_ON_NONE)
+diff -rupNEZbB ./usr/src/minix/servers/vfs/fs.h zad5/usr/src/minix/servers/vfs/fs.h
+--- ./usr/src/minix/servers/vfs/fs.h	2022-05-31 23:18:49.978098139 +0200
++++ zad5/usr/src/minix/servers/vfs/fs.h	2022-06-15 18:02:14.681924885 +0200
+@@ -35,5 +35,6 @@
+ #include "type.h"
+ #include "vmnt.h"
+ #include "fproc.h"
++#include "notify.h"
+ 
+ #endif
+diff -rupNEZbB ./usr/src/minix/servers/vfs/link.c zad5/usr/src/minix/servers/vfs/link.c
+--- ./usr/src/minix/servers/vfs/link.c	2022-05-31 23:18:49.982098139 +0200
++++ zad5/usr/src/minix/servers/vfs/link.c	2022-06-15 18:02:14.685924923 +0200
+@@ -77,6 +77,10 @@ int do_link(void)
+ 	r = req_link(vp->v_fs_e, dirp->v_inode_nr, fullpath,
+ 		     vp->v_inode_nr);
+ 
++  if (r == OK) {
++    notify_free(NOTIFY_CREATE, dirp);
++  }
++
+   unlock_vnode(vp);
+   unlock_vnode(dirp);
+   if (vmp2 != NULL) unlock_vmnt(vmp2);
+@@ -260,6 +264,10 @@ int do_rename(void)
+ 		       new_dirp->v_inode_nr, fullpath);
+   }
+ 
++  if (r == OK && new_dirp != old_dirp) {
++    notify_free(NOTIFY_MOVE, new_dirp);
++  }
++
+   unlock_vnode(old_dirp);
+   unlock_vmnt(oldvmp);
+   if (new_dirp_l) unlock_vnode(new_dirp_l);
+@@ -418,6 +426,10 @@ int do_slink(void)
+ 		      fp->fp_effgid);
+   }
+ 
++  if (r == OK) {
++    notify_free(NOTIFY_CREATE, vp);
++  }
++
+   unlock_vnode(vp);
+   unlock_vmnt(vmp);
+   put_vnode(vp);
+diff -rupNEZbB ./usr/src/minix/servers/vfs/Makefile zad5/usr/src/minix/servers/vfs/Makefile
+--- ./usr/src/minix/servers/vfs/Makefile	2022-05-31 23:18:49.958098139 +0200
++++ zad5/usr/src/minix/servers/vfs/Makefile	2022-06-15 18:02:14.685924923 +0200
+@@ -7,7 +7,8 @@ SRCS=	main.c open.c read.c write.c pipe.
+ 	filedes.c stadir.c protect.c time.c \
+ 	lock.c misc.c utility.c select.c table.c \
+ 	vnode.c vmnt.c request.c \
+-	tll.c comm.c worker.c coredump.c
++	tll.c comm.c worker.c coredump.c \
++	notify.c
+ 
+ .if ${MKCOVERAGE} != "no"
+ SRCS+=  gcov.c
+diff -rupNEZbB ./usr/src/minix/servers/vfs/notify.c zad5/usr/src/minix/servers/vfs/notify.c
+--- ./usr/src/minix/servers/vfs/notify.c	1970-01-01 01:00:00.000000000 +0100
++++ zad5/usr/src/minix/servers/vfs/notify.c	2022-06-15 18:02:14.685924923 +0200
+@@ -0,0 +1,93 @@
++#include "fs.h"
++#include "file.h"
++#include <fcntl.h>
++
++// Mutex ensuring that threads have exclusive access to notify table.
++static mthread_mutex_t notify_lock;
++
++// Initialises mutex on first do_notify/notify_free call.
++static void set_up_lock() {
++  static int already_initiated = 0;
++  if (!already_initiated) {
++    if (mthread_mutex_init(&notify_lock, 0) != 0) {
++      panic("unable to initialise notify_lock");
++    }
++    already_initiated = 1;
++  }
++}
++
++// Locks notify_lock.
++static void lock() {
++  if (mthread_mutex_lock(&notify_lock) != 0) {
++    panic("unable to obtain notify_lock");
++  }
++}
++
++// Unlocks notify_lock.
++static void unlock() {
++  if (mthread_mutex_unlock(&notify_lock) != 0) {
++    panic("unable to release notify_lock");
++  }
++}
++
++int do_notify(void) {
++  set_up_lock();
++
++  int fd = job_m_in.m_lc_vfs_notify.fd;
++  int event = job_m_in.m_lc_vfs_notify.event;
++
++  if (fd < 0 || fd >= OPEN_MAX || fp->fp_filp[fd] == NULL) {
++    return(EBADF);
++  }
++  if (event == NOTIFY_TRIOPEN && fp->fp_filp[fd]->filp_vno->v_ref_count >= 3) {
++    return(OK);
++  }
++  if ((event == NOTIFY_CREATE || event == NOTIFY_MOVE) &&
++      !S_ISDIR(fp->fp_filp[fd]->filp_vno->v_mode)) {
++    return(ENOTDIR);
++  }
++  if (event != NOTIFY_OPEN && event != NOTIFY_TRIOPEN &&
++      event != NOTIFY_CREATE && event != NOTIFY_MOVE) {
++    return(EINVAL);
++  }
++
++  lock();
++  int id = 0;
++  while (id < NR_NOTIFY && notify[id].event != 0) {
++    id++;
++  }
++  if (id == NR_NOTIFY) {
++    unlock();
++    return(ENONOTIFY);
++  }
++  notify[id].vno = fp->fp_filp[fd]->filp_vno;
++  notify[id].event = event;
++  notify[id].fp = fp;
++  unlock();
++
++  suspend(FP_BLOCKED_ON_NOTIFY);
++  return(SUSPEND);
++}
++
++void notify_free(int event, struct vnode *vno) {
++  set_up_lock();
++
++  lock();
++  for (int id = 0; id < NR_NOTIFY; id++) {
++    if (notify[id].event == event && notify[id].vno == vno) {
++      revive(notify[id].fp->fp_endpoint, 0);
++      notify[id].event = 0;
++    }
++  }
++  unlock();
++}
++
++void notify_forget(struct fproc *fp) {
++  lock();
++  for (int id = 0; id < NR_NOTIFY; id++) {
++    if (fp == notify[id].fp) {
++      notify[id].event = 0;
++    }
++  }
++  unlock();
++}
+diff -rupNEZbB ./usr/src/minix/servers/vfs/notify.h zad5/usr/src/minix/servers/vfs/notify.h
+--- ./usr/src/minix/servers/vfs/notify.h	1970-01-01 01:00:00.000000000 +0100
++++ zad5/usr/src/minix/servers/vfs/notify.h	2022-06-15 18:02:14.685924923 +0200
+@@ -0,0 +1,20 @@
++#ifndef __VFS_NOTIFY_H__
++#define __VFS_NOTIFY_H__
++
++#include <fcntl.h>
++#include "vnode.h"
++
++// Table holding processes suspended on notify call.
++EXTERN struct notify {
++  struct vnode *vno;
++  int event;
++  struct fproc *fp;
++} notify[NR_NOTIFY];
++
++// Releases process waiting for event on file vno.
++void notify_free(int event, struct vnode *vno);
++
++// Removes fp from notify table after signal.
++void notify_forget(struct fproc *fp);
++
++#endif
+diff -rupNEZbB ./usr/src/minix/servers/vfs/open.c zad5/usr/src/minix/servers/vfs/open.c
+--- ./usr/src/minix/servers/vfs/open.c	2022-05-31 23:18:49.990098140 +0200
++++ zad5/usr/src/minix/servers/vfs/open.c	2022-06-15 18:02:14.689924960 +0200
+@@ -50,7 +50,14 @@ int do_open(void)
+   if (copy_path(fullpath, sizeof(fullpath)) != OK)
+ 	return(err_code);
+ 
+-  return common_open(fullpath, open_flags, 0 /*omode*/);
++  int fd = common_open(fullpath, open_flags, 0 /*omode*/);
++  if (fd == scratch(fp).file.fd_nr) {
++    notify_free(NOTIFY_OPEN, fp->fp_filp[fd]->filp_vno);
++    if (fp->fp_filp[fd]->filp_vno->v_ref_count >= 3) {
++      notify_free(NOTIFY_TRIOPEN, fp->fp_filp[fd]->filp_vno);
++    }
++  }
++  return fd;
+ }
+ 
+ /*===========================================================================*
+@@ -454,6 +461,9 @@ static struct vnode *new_node(struct loo
+   }
+ 
+   err_code = r;
++
++  notify_free(NOTIFY_CREATE, dirp);
++
+   /* When dirp equals vp, we shouldn't release the lock as a vp is locked only
+    * once. Releasing the lock would cause the resulting vp not be locked and
+    * cause mayhem later on. */
+@@ -541,6 +550,10 @@ int do_mknod(void)
+ 		      fp->fp_effgid, bits, dev);
+   }
+ 
++  if (r == OK) {
++  	notify_free(NOTIFY_CREATE, vp);
++  }
++
+   unlock_vnode(vp);
+   unlock_vmnt(vmp);
+   put_vnode(vp);
+@@ -580,6 +593,10 @@ int do_mkdir(void)
+ 		      fp->fp_effgid, bits);
+   }
+ 
++  if (r == OK) {
++    notify_free(NOTIFY_CREATE, vp);
++  }
++
+   unlock_vnode(vp);
+   unlock_vmnt(vmp);
+   put_vnode(vp);
+diff -rupNEZbB ./usr/src/minix/servers/vfs/pipe.c zad5/usr/src/minix/servers/vfs/pipe.c
+--- ./usr/src/minix/servers/vfs/pipe.c	2022-05-31 23:18:49.994098140 +0200
++++ zad5/usr/src/minix/servers/vfs/pipe.c	2022-06-15 18:02:14.689924960 +0200
+@@ -544,6 +544,10 @@ void unpause(void)
+ 	case FP_BLOCKED_ON_POPEN:	/* process trying to open a fifo */
+ 		break;
+ 
++  case FP_BLOCKED_ON_NOTIFY:/* process blocking on notify() */
++    notify_forget(fp);
++    break;
++
+ 	case FP_BLOCKED_ON_OTHER:/* process trying to do device I/O (e.g. tty)*/
+ 		fild = scratch(fp).file.fd_nr;
+ 		if (fild < 0 || fild >= OPEN_MAX)
+diff -rupNEZbB ./usr/src/minix/servers/vfs/proto.h zad5/usr/src/minix/servers/vfs/proto.h
+--- ./usr/src/minix/servers/vfs/proto.h	2022-05-31 23:18:49.998098140 +0200
++++ zad5/usr/src/minix/servers/vfs/proto.h	2022-06-15 18:02:14.689924960 +0200
+@@ -348,4 +348,8 @@ void worker_wait(void);
+ struct worker_thread *worker_suspend(void);
+ void worker_resume(struct worker_thread *org_self);
+ void worker_set_proc(struct fproc *rfp);
++
++/* notify.c */
++int do_notify(void);
++
+ #endif
+diff -rupNEZbB ./usr/src/minix/servers/vfs/table.c zad5/usr/src/minix/servers/vfs/table.c
+--- ./usr/src/minix/servers/vfs/table.c	2022-05-31 23:18:50.010098141 +0200
++++ zad5/usr/src/minix/servers/vfs/table.c	2022-06-15 18:02:14.693924999 +0200
+@@ -65,4 +65,5 @@ int (* const call_vec[NR_VFS_CALLS])(voi
+ 	CALL(VFS_COPYFD)	= do_copyfd,		/* copyfd(2) */
+ 	CALL(VFS_CHECKPERMS)	= do_checkperms,	/* checkperms(2) */
+ 	CALL(VFS_GETSYSINFO)	= do_getsysinfo,	/* getsysinfo(2) */
++	CALL(VFS_NOTIFY)	= do_notify,		/* notify() */
+ };
+diff -rupNEZbB ./usr/src/sys/sys/errno.h zad5/usr/src/sys/sys/errno.h
+--- ./usr/src/sys/sys/errno.h	2022-06-15 13:27:38.200008490 +0200
++++ zad5/usr/src/sys/sys/errno.h	2022-06-15 18:03:19.482543572 +0200
+@@ -172,7 +172,9 @@
+ #define	ENOLINK		(_SIGN 95 )		/* Link has been severed */
+ #define	EPROTO		(_SIGN 96 )		/* Protocol error */
+ 
+-#define	ELAST		(_SIGN 96 )		/* Must equal largest errno */
++#define	ENONOTIFY		(_SIGN 97 )		/* No more notifications available */
++
++#define	ELAST		(_SIGN 97 )		/* Must equal largest errno */
+ 
+ #if defined(_KERNEL) || defined(_KMEMUSER)
+ /* pseudo-errors returned inside kernel to modify return to process */
+diff -rupNEZbB ./usr/src/sys/sys/fcntl.h zad5/usr/src/sys/sys/fcntl.h
+--- ./usr/src/sys/sys/fcntl.h	2022-06-15 13:27:38.212008504 +0200
++++ zad5/usr/src/sys/sys/fcntl.h	2022-06-15 18:03:19.486543610 +0200
+@@ -301,6 +301,14 @@ struct flock {
+ #define	AT_REMOVEDIR		0x800	/* Remove directory only */
+ #endif
+ 
++/*
++ * Event flags used by notify()
++ */
++#define	NOTIFY_OPEN	0x00000001	/* file is opened */
++#define	NOTIFY_TRIOPEN	0x00000002	/* file is opened >= 3 times simultaneously */
++#define	NOTIFY_CREATE	0x00000004	/* file is created in the directory */
++#define	NOTIFY_MOVE	0x00000008	/* file is moved to the directory */
++
+ 
+ #ifndef _KERNEL
+ #include <sys/cdefs.h>
